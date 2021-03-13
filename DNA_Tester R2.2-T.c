@@ -1,4 +1,4 @@
-//DNA Tester release R1.7.4-test
+//DNA Tester release R2.2-T
 //Update per acutal PCB layout
 //Adding Bluetooth Write - R1.0
 //Adding Bluetooth Read - R1.2
@@ -32,28 +32,31 @@
 // - status byte changed to 2-byte data in bluetooth_write
 //r1.7.4-test
 // - temp_offset always = 0 for testing/evaluation of raw temp sensor
+//r2.0
+// - Modify for the 6-capsule version and temporary for EV board
+// - Major impacts:
+// - UART rate change from 38400 to 115200
+// - ADC0-5 : corresponding to laser detectors; ADC6 : temp sensor
+// - Data packet size increase from 18 to 34; length defines changed from character to decimal
+// - IO are modified to fit the EV board instead of the actual product
 
-//PA0 (LED1) : BT LED
-//PA1 (LED2) : POWER LED
-//PA2 (LED3) : LASER Indicator
-//PA3 (LED4) : HEATER LED
-//PA4 (ADC4) : Temp sensor input
-//PA5 (ADC5) : LASERA detection
-//PA6 (ADC6) : LASERB detection
-//PA7 (VREF) : External VDDA
-//PC7 (KEY1) : WDT test key
-//PC6 (KEY2) : HEATER ON/OFF key
-//PF8 (KEY3) : Reserved
-//PB8 (KEY4) : BOX_OPEN
-//PF4 (PWM)  : HEATER PWM control
-//PB12 : LASER_LED (laser module)
-//UART1: BT connection
+//r2.1-T
+// - Modify the IO to fit the final schematics
+// - VREF = 3.3V
+// - Release PC0,1,2,3 as debug LEDs
+// - Temp offset = 0 for testing
+// - Disable BOD for large current test
 
-//DEBUG LEDs
-//PC0,1,2,3
+//r2.2
+// - Enable BOD
+// - Correct the temp sensor detection bug; need to restart a new ADC for each sensor
+// - Add comments about temp_offset calculation
 
-//Test Points
-//PD6, 14
+//r2.2-T
+// - remove temp_offset
+
+//r2.3
+// - modify temp_offset equation due to new 6 capsule device
 
 //Use TMR0 timer interrupt to do regular routines
 
@@ -68,14 +71,44 @@
 #include "NUC131.h"
 
 //PORT NAME ASSIGNMENT
-#define HEATER_LED 		PA3
-#define LASER_INDICATOR PA2
-#define BT_LED 			PA0
-#define POWER_LED 		PA1
+
+//PA0 (ADC0) : Laser A1 detection
+//PA1 (ADC1) : Laser B1 detection
+//PA2 (ADC2) : Laser A2 detection
+//PA3 (ADC3) : Laser B2 detection
+//PA4 (ADC4) : Laser A3 detection
+//PA5 (ADC5) : Laser B3 detection
+//PA6 (ADC6) : Temperature sensor detection
+//PA7 (VREF) : External VDDA
+//PA12 : POWER LED
+//PA13 : HEATER LED
+//PA14 : LASER Indicator LED
+//PA15 : BT LED
+//PB0 (SENSOR_A): Thermal sensor select A
+//PB1 (SENSOR_B): Thermal sensor select B
+//PC7 (KEY1) : WDT test key
+//PC6 (KEY2) : HEATER ON/OFF key
+//PF8 (KEY3) : Reserved
+//PB8 (KEY4) : BOX_OPEN
+//PF4 (PWM)  : HEATER PWM control
+//PB12 : LASER_LED (laser module)
+//UART1: BT connection
+
+//DEBUG LEDs
+//PC0,1,2,3
+
+//Test Points
+//PD6, 14
+
+#define HEATER_LED 		PA13
+#define LASER_INDICATOR PA14
+#define BT_LED 			PA15
+#define POWER_LED 		PA12
 #define LASER_LED 		PB12
 #define BOX_OPEN_DETECT PB8
 #define HEATER_KEY 		PC6
-
+#define THERMAL_SENSE_A PB0
+#define THERMAL_SENSE_B PB2
 
 //Timer Fixed Parameters
 #define TIMER_PERIOD 		50 // Timer0 period in ms
@@ -89,8 +122,9 @@
 #define ROOM_TEMP 			25 		//in degC
 #define TEMP_ERROR_LIMIT 	60 		//in unit of LED_TIMER_COUNT
 #define DEFAULT_TEMP		65 		//in degC
+//VREF = 3.3V
 #define VREF				3300	//in mV
-#define TEMP_OFFSET			0		//Temp sensor - Temp chamber = -2degC @ temp set at 65degC
+#define DEFAULT_TEMP_OFFSET	20		//Temp sensor - Temp chamber = -2degC @ temp set at 65degC
 //Define heater PWM max & min values per different temp settings to minimize temp variation around the target temp
 //This is to be fine-tune after construction of the casing & heater block
 #define HEATER_MAX_65deg 	1000
@@ -116,19 +150,37 @@ int 		average_temp_adc = 0;
 int 		display_temp = ROOM_TEMP;
 short int 	temp_error_count = 1;
 float 		temp_offset = 0; //Temp sensor - Temp chamber = -2degC when temp is set at 65degC
-int 		user_temp_adc = ((DEFAULT_TEMP * 10)- TEMP_OFFSET)*4096/VREF;
+int 		user_temp_adc = ((DEFAULT_TEMP * 10)- DEFAULT_TEMP_OFFSET)*4096/VREF;
 uint8_t		rising_temp_reached = 0;
 
 
 //Laser variables with initialization
-short int 	current_laser_A = 0;
-short int 	current_laser_B = 0;
-int 		framed_laser_A = 0;
-int 		framed_laser_B = 0;
-int 		average_laser_A = 0;
-int 		average_laser_B = 0;
-int 		display_laser_A = 0;
-int 		display_laser_B = 0;
+short int 	current_laser_1A = 0;
+short int 	current_laser_1B = 0;
+int 		framed_laser_1A = 0;
+int 		framed_laser_1B = 0;
+int 		average_laser_1A = 0;
+int 		average_laser_1B = 0;
+int 		display_laser_1A = 0;
+int 		display_laser_1B = 0;
+
+short int 	current_laser_2A = 0;
+short int 	current_laser_2B = 0;
+int 		framed_laser_2A = 0;
+int 		framed_laser_2B = 0;
+int 		average_laser_2A = 0;
+int 		average_laser_2B = 0;
+int 		display_laser_2A = 0;
+int 		display_laser_2B = 0;
+
+short int 	current_laser_3A = 0;
+short int 	current_laser_3B = 0;
+int 		framed_laser_3A = 0;
+int 		framed_laser_3B = 0;
+int 		average_laser_3A = 0;
+int 		average_laser_3B = 0;
+int 		display_laser_3A = 0;
+int 		display_laser_3B = 0;
 
 //System Status flags with initialization
 uint8_t 	status_power_ok = 1; // 1: VDD > 4.4V (5V_DC > 4.7V)
@@ -157,7 +209,7 @@ uint8_t 	g_UART1_RX_Status = 2;
 
 //BT Communications variables
 char 		output_string[4]={};
-char		g_TX_data_buffer[15]={};
+char		g_TX_data_buffer[31]={};
 uint8_t 	RX_data_valid_ACK=0;
 uint8_t		TX_data_valid_ACK=0;
 uint8_t		TX_NACK_count=0;
@@ -199,9 +251,9 @@ short int PID_Calcul(int currentPWM,int last_Err,short int current_temp_adc,shor
 	last_error = current_error;
 
 	//Limit the heater PWM not to exceed it physical limits to avoid damage
-	//ADC (VERF = 3.3V) for 35degC = 423 after offset adjustment
-	//ADC (VERF = 3.3V) for 45degC = 543 after offset adjustment
-	if (target_temp_adc > 543)
+	//ADC (VREF = 3.3V) for 35degC = 424 after offset adjustment
+	//ADC (VREF = 3.3V) for 45degC = 543 after offset adjustment
+	if (target_temp_adc > (558-15))
     {
     	heater_pwm_min = HEATER_MIN_65deg;							//46 to 65degC with offset
 		if (rising_temp_reached==0)
@@ -210,7 +262,7 @@ short int PID_Calcul(int currentPWM,int last_Err,short int current_temp_adc,shor
 			heater_pwm_max = HEATER_MAX_65deg;
 
     }
-    else if ((target_temp_adc <= 543) && (target_temp_adc >= 423))	//35 to 45degC with offset
+    else if ((target_temp_adc <= (558-15)) && (target_temp_adc >= (434-10)))	//35 to 45degC with offset
     {
     	heater_pwm_min = HEATER_MIN_45deg;
 		if (rising_temp_reached==0)
@@ -304,7 +356,12 @@ void UART1_IRQHandler(void)
 							{
 								//Calculate the user setting temp adc value from 2nd & 3rd data packet bytes
 								//update user_temp_adc for PID
-								//temp_offset = 0.38*temp_input-4.68;
+
+								//temp_offest is temperature dependent and hence should be calculated using equation
+								//temp_offset = 0.4*temp_input+14;
+								temp_offset =0;
+
+								//User_temp_adc is then found with calculated temp_offset
 								user_temp_adc = ((temp_input*10)-temp_offset)*4096/VREF;
 								//mini_pwm_per_temp = 500-(65-temp_input)*12;
 								//status_heater = 1;			//turn on heater status
@@ -316,7 +373,11 @@ void UART1_IRQHandler(void)
 							{
 								//Calculate the user setting temp adc value from 2nd & 3rd data packet bytes
 								//update user_temp_adc for PID
-								//temp_offset = 0.38*temp_input-4.68;
+
+								//temp_offest is temperature dependent and hence should be calculated using equation
+								//temp_offset = 0.4*temp_input+14;
+								temp_offset = 0;
+								//User_temp_adc is then found with calculated temp_offset
 								user_temp_adc = ((temp_input*10)-temp_offset)*4096/VREF;
 								status_heater = RX_data_packet[4]-0x30; //update laser status
 								status_laser = 0; 			//turn off laser status
@@ -412,12 +473,13 @@ void dec_to_char(int four_digit_input)
 //A complete Command Write to BT SPP
 void Bluetooth_write (uint8_t command_type, uint8_t length, char input_string[])
 {
-	char	data_packet[18]={};
+	char	data_packet[34]={};
 
 	//====================================================================================
 	//Construct the data packet
 	data_packet[0]  	= 0x41;					// Start Byte 'A'
-	data_packet[1]  	= 'E';					// User-Data Length = 14 in ASCII, excluding Command byte
+	//data_packet[1]  	= 'E';					// User-Data Length = 14 in ASCII, excluding Command byte
+	data_packet[1]		= 0x1F;					// User-Data Length = 31, excluding Command byte; value = 31(d)
 	data_packet[2]  	= command_type + 0x30;	// Command type in ASCII
 
 	for (uint8_t index=3; index<(length+2); index++)
@@ -453,15 +515,31 @@ void TMR0_IRQHandler(void)
     	WDT_RESET_COUNTER();
     	SYS_LockReg();//Enable Write-protection for the critical registers
     	}
-    //Read the temperature & laser values from the sensors
+    //Read the temperature & laser values from the sensors with temp sensor1
+	THERMAL_SENSE_A=0; THERMAL_SENSE_B=0; wait(50);//Select sensor1
     ADC_START_CONV(ADC);
     //Wait conversion done (ADF flag = 1)
     while(!ADC_GET_INT_FLAG(ADC, ADC_ADF_INT)); //max = 1.5us
     // Clear the A/D interrupt flag for safe
     ADC_CLR_INT_FLAG(ADC, ADC_ADF_INT);
-    current_temp_adc = ADC_GET_CONVERSION_DATA(ADC,4);
-	current_laser_A = ADC_GET_CONVERSION_DATA(ADC,5);
-	current_laser_B = ADC_GET_CONVERSION_DATA(ADC,6);
+	current_laser_1A = ADC_GET_CONVERSION_DATA(ADC,0);
+	current_laser_1B = ADC_GET_CONVERSION_DATA(ADC,1);
+	current_laser_2A = ADC_GET_CONVERSION_DATA(ADC,2);
+	current_laser_2B = ADC_GET_CONVERSION_DATA(ADC,3);
+	current_laser_3A = ADC_GET_CONVERSION_DATA(ADC,4);
+	current_laser_3B = ADC_GET_CONVERSION_DATA(ADC,5);
+    current_temp_adc = ADC_GET_CONVERSION_DATA(ADC,6);
+
+    //Read the temperature & laser values from the sensors with temp sensor2
+	THERMAL_SENSE_A=1; THERMAL_SENSE_B=0; wait(50);//Select sensor2
+    ADC_START_CONV(ADC);
+    //Wait conversion done (ADF flag = 1)
+    while(!ADC_GET_INT_FLAG(ADC, ADC_ADF_INT)); //max = 1.5us
+    // Clear the A/D interrupt flag for safe
+    ADC_CLR_INT_FLAG(ADC, ADC_ADF_INT);
+    current_temp_adc += ADC_GET_CONVERSION_DATA(ADC,6);
+    current_temp_adc = current_temp_adc/2;// Take the average of the two sensors
+
 
     //**************************************************************************
     //Call the routine to do PID based on PID timer
@@ -576,28 +654,61 @@ void  average_laser_cal (void)
 	{
 		//Calculate average laser over the LASER_TIMER_COUNT period
 		//Update the status_temp_ok flag based on this average value
-		framed_laser_A = framed_laser_A + current_laser_A;
-		average_laser_A = framed_laser_A / LASER_average_timer;
-		framed_laser_B = framed_laser_B + current_laser_B;
-		average_laser_B = framed_laser_B / LASER_average_timer;
+		framed_laser_1A = framed_laser_1A + current_laser_1A;
+		average_laser_1A = framed_laser_1A / LASER_average_timer;
+		framed_laser_1B = framed_laser_1B + current_laser_1B;
+		average_laser_1B = framed_laser_1B / LASER_average_timer;
 
+		framed_laser_2A = framed_laser_2A + current_laser_2A;
+		average_laser_2A = framed_laser_2A / LASER_average_timer;
+		framed_laser_2B = framed_laser_2B + current_laser_2B;
+		average_laser_2B = framed_laser_2B / LASER_average_timer;
+
+		framed_laser_3A = framed_laser_3A + current_laser_3A;
+		average_laser_3A = framed_laser_3A / LASER_average_timer;
+		framed_laser_3B = framed_laser_3B + current_laser_3B;
+		average_laser_3B = framed_laser_3B / LASER_average_timer;
 		//************************************************************
 
 		//Pass the average laser values to display in UART later
 		//Laser detector value will be display in XXXX mV (4 SIG FIG)
-		//RESET Temperature variables
 		LASER_average_timer = 1;
-		display_laser_A = average_laser_A * VREF/4096;
-		display_laser_B = average_laser_B * VREF/4096;
-		framed_laser_A = 0;
-		framed_laser_B = 0;
-		average_laser_A = 0;
-		average_laser_B = 0;
+		display_laser_1A = average_laser_1A * VREF/4096;
+		display_laser_1B = average_laser_1B * VREF/4096;
+		display_laser_2A = average_laser_2A * VREF/4096;
+		display_laser_2B = average_laser_2B * VREF/4096;
+		display_laser_3A = average_laser_3A * VREF/4096;
+		display_laser_3B = average_laser_3B * VREF/4096;
+
+		//*************************************************************
+
+		//Reset all the laser values
+		framed_laser_1A = 0;
+		framed_laser_1B = 0;
+		average_laser_1A = 0;
+		average_laser_1B = 0;
+
+		framed_laser_2A = 0;
+		framed_laser_2B = 0;
+		average_laser_2A = 0;
+		average_laser_2B = 0;
+
+		framed_laser_3A = 0;
+		framed_laser_3B = 0;
+		average_laser_3A = 0;
+		average_laser_3B = 0;
+
+		//*************************************************************
 	}
 	else
 	{
-		framed_laser_A = framed_laser_A + current_laser_A;
-		framed_laser_B = framed_laser_B + current_laser_B;
+		framed_laser_1A = framed_laser_1A + current_laser_1A;
+		framed_laser_1B = framed_laser_1B + current_laser_1B;
+		framed_laser_2A = framed_laser_2A + current_laser_2A;
+		framed_laser_2B = framed_laser_2B + current_laser_2B;
+		framed_laser_3A = framed_laser_3A + current_laser_3A;
+		framed_laser_3B = framed_laser_3B + current_laser_3B;
+
 		LASER_average_timer++;
 	}
 }
@@ -605,27 +716,59 @@ void  average_laser_cal (void)
 
 void LASER_read(void)
 {
-	char data_buffer[8] ={};
+	char data_buffer[24] ={};
 
 	//***********************Send the Laser ADC values************************************
 	//Send averaged laser detector values to UART
 
 	if (LASER_timer == LASER_TIMER_COUNT/TIMER_PERIOD)
 	{
-		//Convert Laser A ADC to characters
-		dec_to_char(display_laser_A);
+		//Convert Laser 1A ADC to characters
+		dec_to_char(display_laser_1A);
 		for (int i=0; i<4; i++)
 		{
 			data_buffer[i] = output_string[i];
 			g_TX_data_buffer [i] = output_string[i];//save to global buffer
 		}
 
-		//Convert Laser B ADC to characters
-		dec_to_char(display_laser_B);
+		//Convert Laser 1B ADC to characters
+		dec_to_char(display_laser_1B);
 		for (int i=0; i<4; i++)
 		{
 			data_buffer[i+4] = output_string[i];
 			g_TX_data_buffer [i+4] = output_string[i];//save to global buffer
+		}
+
+		//Convert Laser 2A ADC to characters
+		dec_to_char(display_laser_2A);
+		for (int i=0; i<4; i++)
+		{
+			data_buffer[i+8] = output_string[i];
+			g_TX_data_buffer [i+8] = output_string[i];//save to global buffer
+		}
+
+		//Convert Laser 2B ADC to characters
+		dec_to_char(display_laser_2B);
+		for (int i=0; i<4; i++)
+		{
+			data_buffer[i+12] = output_string[i];
+			g_TX_data_buffer [i+12] = output_string[i];//save to global buffer
+		}
+
+		//Convert Laser 3A ADC to characters
+		dec_to_char(display_laser_3A);
+		for (int i=0; i<4; i++)
+		{
+			data_buffer[i+16] = output_string[i];
+			g_TX_data_buffer [i+16] = output_string[i];//save to global buffer
+		}
+
+		//Convert Laser 3B ADC to characters
+		dec_to_char(display_laser_3B);
+		for (int i=0; i<4; i++)
+		{
+			data_buffer[i+20] = output_string[i];
+			g_TX_data_buffer [i+20] = output_string[i];//save to global buffer
 		}
 
 		//Reset laser timer
@@ -742,7 +885,7 @@ void LED_status_update(void)
 	//Decrement or Reset LED_timer counter
 	if (LED_timer == LED_TIMER_COUNT/TIMER_PERIOD) //update LED according to status flag per LED_timer so that flashing can be achieved
 		{
-		PC1 =0;
+		PD14 =0;
 
 		//*****************************************************
 		//Report status flags to Bluetooth
@@ -764,21 +907,21 @@ void LED_status_update(void)
 		for (int i=0; i<4; i++)
 		{
 			data_buffer[i] = output_string[i];
-			g_TX_data_buffer[i+8] = output_string[i];
+			g_TX_data_buffer[i+24] = output_string[i];
 		}
 
 		//Send status byte to global display buffer
-		g_TX_data_buffer[12] = status1;
-		g_TX_data_buffer[13] = status2;
+		g_TX_data_buffer[28] = status1;
+		g_TX_data_buffer[29] = status2;
 
-		//Send out data to Bluetooth with 14-byte data payload + 1 Byte Command
-		Bluetooth_write(COMMAND_LASER, 15, g_TX_data_buffer);
+		//Send out data to Bluetooth with 30-byte data payload + 1 Byte Command
+		Bluetooth_write(COMMAND_LASER, 31, g_TX_data_buffer);
 
 		RX_data_valid_ACK = 0; //Clear RX_data_valid_ACK immediately to wait for a new async packet from mobile
 
 		//Reset LED_timer
 		LED_timer = 1;
-		PC1=1;
+		PD14=1;
 		}
 	else
 		{
@@ -833,11 +976,12 @@ void SYS_Init(void)
 	// Reset PWM1
     SYS_ResetModule(PWM1_RST);
 
-    // Disable the PA4,5,6,7 digital input path to avoid the leakage current.
-	GPIO_DISABLE_DIGITAL_PATH(PA, 0xF0);
+    // Disable the PA0-7 digital input path to avoid the leakage current.
+	GPIO_DISABLE_DIGITAL_PATH(PA, 0xFF);
 
 	// Enable Brown-out detector and its interrupt
 	// BOD interrupt mode, set at 3.74 - 3.84V threshold
+
 	SYS_EnableBOD(SYS_BODCR_BOD_INTERRUPT_EN,SYS_BODCR_BOD_VL_3_7V);
 	SYS_DISABLE_BOD_RST();//Enable Brown-out INT
 
@@ -848,10 +992,10 @@ void SYS_Init(void)
 	// Configure ADC Analog Input Pins
 	// Configure external AD VDDA reference
 	// Configure UART1
-    SYS->VREFCR = 0x00; //access VREFCR to external VREF at PA7
-	SYS->ALT_MFP3 = SYS_ALT_MFP3_PF4_PWM1_CH4;
+	SYS->VREFCR = 0x00; //access VREFCR to external VREF at PA7
+    SYS->ALT_MFP3 = SYS_ALT_MFP3_PF4_PWM1_CH4;
     SYS->ALT_MFP4 = SYS_ALT_MFP4_PA7_Vref;
-    SYS->GPA_MFP = SYS_GPA_MFP_PA7_Vref | SYS_GPA_MFP_PA6_ADC6 | SYS_GPA_MFP_PA5_ADC5 | SYS_GPA_MFP_PA4_ADC4;
+    SYS->GPA_MFP = SYS_GPA_MFP_PA7_Vref | SYS_GPA_MFP_PA6_ADC6 | SYS_GPA_MFP_PA5_ADC5 | SYS_GPA_MFP_PA4_ADC4 | SYS_GPA_MFP_PA3_ADC3 | SYS_GPA_MFP_PA2_ADC2 | SYS_GPA_MFP_PA1_ADC1 | SYS_GPA_MFP_PA0_ADC0;
     SYS->GPB_MFP = SYS_GPB_MFP_PB5_UART1_TXD | SYS_GPB_MFP_PB4_UART1_RXD;
     SYS->GPF_MFP = SYS_GPF_MFP_PF7_ICE_DAT | SYS_GPF_MFP_PF6_ICE_CLK | SYS_GPF_MFP_PF4_PWM1_CH4;
 
@@ -865,14 +1009,11 @@ int32_t main(void)
     SYS_LockReg();//Enable Write-protection for the critical registers
 
     // LED & outputs
-    GPIO_SetMode(PA, BIT0, GPIO_PMD_OUTPUT);
-    GPIO_SetMode(PA, BIT1, GPIO_PMD_OUTPUT);
-    GPIO_SetMode(PA, BIT2, GPIO_PMD_OUTPUT);
-    GPIO_SetMode(PA, BIT3, GPIO_PMD_OUTPUT);
-    GPIO_SetMode(PC, BIT0, GPIO_PMD_OUTPUT); //Debug LED
-    GPIO_SetMode(PC, BIT1, GPIO_PMD_OUTPUT); //Debug LED, Test Point
-    GPIO_SetMode(PC, BIT2, GPIO_PMD_OUTPUT); //Debug LED
-    GPIO_SetMode(PC, BIT3, GPIO_PMD_OUTPUT); //Debug LED, Test Point
+
+    GPIO_SetMode(PC, BIT0, GPIO_PMD_OUTPUT);
+    GPIO_SetMode(PC, BIT1, GPIO_PMD_OUTPUT);
+    GPIO_SetMode(PC, BIT2, GPIO_PMD_OUTPUT);
+    GPIO_SetMode(PC, BIT3, GPIO_PMD_OUTPUT);
 
 	// Laser output
 	GPIO_SetMode(PB, BIT12, GPIO_PMD_OUTPUT);
@@ -885,7 +1026,11 @@ int32_t main(void)
 
     //Test points
     GPIO_SetMode(PD, BIT6, GPIO_PMD_OUTPUT); //TP2
-    GPIO_SetMode(PD, BIT14, GPIO_PMD_QUASI);
+    GPIO_SetMode(PD, BIT14, GPIO_PMD_OUTPUT); //TP
+
+    //Thermal sensor selection outputs
+    GPIO_SetMode(PB, BIT0, GPIO_PMD_OUTPUT); //Thermal sensor A
+    GPIO_SetMode(PB, BIT2, GPIO_PMD_OUTPUT); //Thermal sensor B
 
     //IO Initialization
 	//Turn on power LED
@@ -894,7 +1039,13 @@ int32_t main(void)
 	BT_LED = 1;
 	LASER_INDICATOR = 1;
     LASER_LED=0;
-	PC0 = 1; PC1 = 1; PC2 = 1; PC3 = 1; PD6=1;
+
+    //Thermal sensor selection outputs
+    THERMAL_SENSE_A=0; THERMAL_SENSE_B=0;
+
+	PC0 = 1; PC1 = 1; PC2 = 1; PC3 = 1;
+    PD6=1;
+    PD14=1;
 
     //*********************HEATER PWM configure******************
 	//Make sure HEATER is OFF at early stage during startup
@@ -914,8 +1065,8 @@ int32_t main(void)
 	// Set the ADC operation mode as
 	// single-cycle scan mode, input mode as single-end
 	// enable the analog input channels, bit0 for CH0, bit1 for CH1 and so on
-	ADC_Open(ADC, ADC_ADCR_DIFFEN_SINGLE_END, ADC_ADCR_ADMD_SINGLE_CYCLE, 0x70); // open for ADC4,5,6
-
+	ADC_Open(ADC, ADC_ADCR_DIFFEN_SINGLE_END, ADC_ADCR_ADMD_SINGLE_CYCLE, 0x7F); // open for ADC0-6
+	//ADC_Open(ADC, ADC_ADCR_DIFFEN_SINGLE_END, ADC_ADCR_ADMD_CONTINUOUS, 0xFF); // open for ADC0-6
 	// Power on ADC module
 	ADC_POWER_ON(ADC);
 
@@ -925,7 +1076,7 @@ int32_t main(void)
 
 
 	// Init UART1
-	UART_Open(UART1, 38400);
+	UART_Open(UART1, 115200);//increased baud rate
 	UART_EnableInt(UART1, (UART_IER_RDA_IEN_Msk));//Enable UART1 RX INT
 	NVIC_SetPriority(UART1_IRQn,1); //set UART INT priority (=1)
 	NVIC_EnableIRQ(UART1_IRQn);
@@ -984,3 +1135,10 @@ int32_t main(void)
     }
 
 }
+
+
+
+
+
+
+
