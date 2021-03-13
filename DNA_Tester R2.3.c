@@ -1,4 +1,4 @@
-//DNA Tester release R2.2-T
+//DNA Tester release R2.3
 //Update per acutal PCB layout
 //Adding Bluetooth Write - R1.0
 //Adding Bluetooth Read - R1.2
@@ -57,6 +57,7 @@
 
 //r2.3
 // - modify temp_offset equation due to new 6 capsule device
+
 
 //Use TMR0 timer interrupt to do regular routines
 
@@ -181,6 +182,7 @@ int 		average_laser_3A = 0;
 int 		average_laser_3B = 0;
 int 		display_laser_3A = 0;
 int 		display_laser_3B = 0;
+
 
 //System Status flags with initialization
 uint8_t 	status_power_ok = 1; // 1: VDD > 4.4V (5V_DC > 4.7V)
@@ -358,8 +360,8 @@ void UART1_IRQHandler(void)
 								//update user_temp_adc for PID
 
 								//temp_offest is temperature dependent and hence should be calculated using equation
-								//temp_offset = 0.4*temp_input+14;
-								temp_offset =0;
+								temp_offset = 0.954*temp_input-21.1;
+								//temp_offset =0;
 
 								//User_temp_adc is then found with calculated temp_offset
 								user_temp_adc = ((temp_input*10)-temp_offset)*4096/VREF;
@@ -375,8 +377,8 @@ void UART1_IRQHandler(void)
 								//update user_temp_adc for PID
 
 								//temp_offest is temperature dependent and hence should be calculated using equation
-								//temp_offset = 0.4*temp_input+14;
-								temp_offset = 0;
+								temp_offset = 0.954*temp_input-21.1;
+								//temp_offset = 0;
 								//User_temp_adc is then found with calculated temp_offset
 								user_temp_adc = ((temp_input*10)-temp_offset)*4096/VREF;
 								status_heater = RX_data_packet[4]-0x30; //update laser status
@@ -671,6 +673,7 @@ void  average_laser_cal (void)
 		//************************************************************
 
 		//Pass the average laser values to display in UART later
+		//Use laser correction factor to calibrate
 		//Laser detector value will be display in XXXX mV (4 SIG FIG)
 		LASER_average_timer = 1;
 		display_laser_1A = average_laser_1A * VREF/4096;
