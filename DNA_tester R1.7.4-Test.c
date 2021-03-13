@@ -1,4 +1,4 @@
-//DNA Tester release R1.7.4
+//DNA Tester release R1.7.4-test
 //Update per acutal PCB layout
 //Adding Bluetooth Write - R1.0
 //Adding Bluetooth Read - R1.2
@@ -90,7 +90,7 @@
 #define TEMP_ERROR_LIMIT 	60 		//in unit of LED_TIMER_COUNT
 #define DEFAULT_TEMP		65 		//in degC
 #define VREF				3300	//in mV
-#define TEMP_OFFSET			20		//Temp sensor - Temp chamber = -2degC @ temp set at 65degC
+#define TEMP_OFFSET			0		//Temp sensor - Temp chamber = -2degC @ temp set at 65degC
 //Define heater PWM max & min values per different temp settings to minimize temp variation around the target temp
 //This is to be fine-tune after construction of the casing & heater block
 #define HEATER_MAX_65deg 	1000
@@ -115,7 +115,7 @@ int 		framed_temp_adc = 0;
 int 		average_temp_adc = 0;
 int 		display_temp = ROOM_TEMP;
 short int 	temp_error_count = 1;
-float 		temp_offset = 20; //Temp sensor - Temp chamber = -2degC when temp is set at 65degC
+float 		temp_offset = 0; //Temp sensor - Temp chamber = -2degC when temp is set at 65degC
 int 		user_temp_adc = ((DEFAULT_TEMP * 10)- TEMP_OFFSET)*4096/VREF;
 uint8_t		rising_temp_reached = 0;
 
@@ -199,9 +199,9 @@ short int PID_Calcul(int currentPWM,int last_Err,short int current_temp_adc,shor
 	last_error = current_error;
 
 	//Limit the heater PWM not to exceed it physical limits to avoid damage
-	//ADC (VERF = 3.3V) for 35degC = 424 after offset adjustment
+	//ADC (VERF = 3.3V) for 35degC = 423 after offset adjustment
 	//ADC (VERF = 3.3V) for 45degC = 543 after offset adjustment
-	if (target_temp_adc > (558-15))
+	if (target_temp_adc > 543)
     {
     	heater_pwm_min = HEATER_MIN_65deg;							//46 to 65degC with offset
 		if (rising_temp_reached==0)
@@ -210,7 +210,7 @@ short int PID_Calcul(int currentPWM,int last_Err,short int current_temp_adc,shor
 			heater_pwm_max = HEATER_MAX_65deg;
 
     }
-    else if ((target_temp_adc <= (558-15)) && (target_temp_adc >= (434-10)))	//35 to 45degC with offset
+    else if ((target_temp_adc <= 543) && (target_temp_adc >= 423))	//35 to 45degC with offset
     {
     	heater_pwm_min = HEATER_MIN_45deg;
 		if (rising_temp_reached==0)
@@ -304,7 +304,7 @@ void UART1_IRQHandler(void)
 							{
 								//Calculate the user setting temp adc value from 2nd & 3rd data packet bytes
 								//update user_temp_adc for PID
-								temp_offset = 0.4*temp_input-6;
+								//temp_offset = 0.38*temp_input-4.68;
 								user_temp_adc = ((temp_input*10)-temp_offset)*4096/VREF;
 								//mini_pwm_per_temp = 500-(65-temp_input)*12;
 								//status_heater = 1;			//turn on heater status
@@ -316,7 +316,7 @@ void UART1_IRQHandler(void)
 							{
 								//Calculate the user setting temp adc value from 2nd & 3rd data packet bytes
 								//update user_temp_adc for PID
-								temp_offset = 0.4*temp_input-6;
+								//temp_offset = 0.38*temp_input-4.68;
 								user_temp_adc = ((temp_input*10)-temp_offset)*4096/VREF;
 								status_heater = RX_data_packet[4]-0x30; //update laser status
 								status_laser = 0; 			//turn off laser status
