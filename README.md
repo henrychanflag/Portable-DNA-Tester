@@ -1,5 +1,6 @@
 # Portable-DNA-Tester
-Release notes for DNA tester
+The platform is NUC-131
+Release notes:
 R0.1: 1st release
 
 R0.2:
