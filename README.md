@@ -143,3 +143,6 @@ R2.3
 
 R2.4
 - Add laser adjustment factor
+
+R2.5
+- Limit max laser value to 3300 after adjustment
